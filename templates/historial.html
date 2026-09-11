@@ -77,9 +77,16 @@ async function cargarHistorial() {
           <strong>${p.pedido_id}</strong> — ${p.cliente || 'Sin nombre'}
           <div style="color:var(--muted); font-size:12px; margin-top:2px;">${p.fecha || ''} ${p.telefono ? '· ' + p.telefono : ''}</div>
         </div>
-        <div style="display:flex; align-items:center; gap:10px;">
+        <div style="display:flex; align-items:center; gap:12px;">
           <span class="pill-pago ${pillClase}">${pillTexto}${p.metodo_pago==='transferencia' && p.num_transaccion ? ' · '+p.num_transaccion : ''}</span>
           <strong>$${p.total.toFixed(2)}</strong>
+          <button 
+            type="button" 
+            onclick="event.stopPropagation(); eliminarPedido('${p.pedido_id}')"
+            style="background:#fee2e2; color:#b91c1c; border:1px solid #fca5a5; padding:5px 10px; border-radius:6px; font-size:12px; font-weight:600; cursor:pointer;"
+            title="Marcar como entregado o borrar pedido creado por error">
+            ✓ Entregado / Eliminar
+          </button>
         </div>
       </summary>
       <div class="pedido-body">
@@ -101,6 +108,35 @@ async function cargarHistorial() {
       </div>
     `;
     cont.appendChild(det);
+  }
+}
+
+async function eliminarPedido(pedidoId) {
+  const confirmacion = confirm(`¿Deseas marcar como entregado o eliminar el pedido ${pedidoId}? Esta acción lo quitará del registro.`);
+  if (!confirmacion) return;
+
+  try {
+    const res = await fetch(`/api/pedido/${pedidoId}`, {
+      method: 'DELETE'
+    });
+    const data = await res.json();
+
+    if (data.ok) {
+      if (typeof showToast === 'function') {
+        showToast('Pedido eliminado correctamente', 'success');
+      } else {
+        alert('Pedido eliminado correctamente');
+      }
+      cargarHistorial();
+    } else {
+      if (typeof showToast === 'function') {
+        showToast('Error: ' + data.error, 'error');
+      } else {
+        alert('Error: ' + data.error);
+      }
+    }
+  } catch (err) {
+    alert('Error de conexión al intentar eliminar el pedido.');
   }
 }
 
