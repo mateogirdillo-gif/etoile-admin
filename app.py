@@ -141,6 +141,14 @@ def api_historial():
         return jsonify({"ok": False, "error": str(e)}), 500
 
 
+@app.route("/eliminar-pedido/<pedido_id>", methods=["POST"])
+def ruta_eliminar_pedido(pedido_id):
+    try:
+        eliminar_pedido(pedido_id)
+        return redirect(url_for("ver_pedidos"))  # o redireccionar al historial
+    except Exception as e:
+        return f"Error al eliminar: {str(e)}", 400
+
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
