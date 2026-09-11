@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{% block title %}Étoile · Admin{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+{% block extra_head %}{% endblock %}
+</head>
+<body>
+<header class="topbar">
+  <a href="/" class="brand">Étoile</a>
+  <nav class="tabs">
+    <a href="/" class="{{ 'active' if active=='catalogo' else '' }}">Catálogo</a>
+    <a href="/pedido" class="{{ 'active' if active=='pedido' else '' }}">Nuevo pedido</a>
+    <a href="/historial" class="{{ 'active' if active=='historial' else '' }}">Historial</a>
+  </nav>
+</header>
+<main>
+  {% block content %}{% endblock %}
+</main>
+<div class="toast" id="toast"></div>
+<script>
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (type ? ' ' + type : '');
+  setTimeout(() => { t.className = 'toast'; }, 3200);
+}
+</script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

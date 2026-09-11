@@ -1,0 +1,214 @@
+{% extends "base.html" %}
+{% block title %}Nuevo pedido · Étoile{% endblock %}
+{% block content %}
+{% set active = 'pedido' %}
+<h1 class="page-title">Nuevo pedido</h1>
+<p class="page-sub">Busca las prendas, arma el carrito y registra el pago.</p>
+
+<div style="display:grid; grid-template-columns: 1.4fr 1fr; gap:24px; align-items:start;">
+  <div>
+    <div class="search-bar">
+      <input type="text" id="buscador" placeholder="Buscar por prenda, color o código..." style="flex:1">
+    </div>
+    <div id="resultados"></div>
+  </div>
+
+  <div class="carrito">
+    <h3>Pedido actual</h3>
+
+    <div class="field">
+      <label>Cliente</label>
+      <input type="text" id="cliente" placeholder="Nombre del cliente">
+    </div>
+    <div class="field">
+      <label>Teléfono</label>
+      <input type="tel" id="telefono" placeholder="09xxxxxxxx">
+    </div>
+
+    <div id="carrito-items"></div>
+    <div id="carrito-vacio" class="empty-state" style="padding:20px 0;">Sin prendas agregadas todavía.</div>
+
+    <div class="total-line">
+      <span>Total</span>
+      <span id="total">$0.00</span>
+    </div>
+
+    <div class="field">
+      <label>Método de pago</label>
+      <select id="metodo_pago">
+        <option value="efectivo">Efectivo</option>
+        <option value="transferencia">Transferencia / pago digital</option>
+      </select>
+    </div>
+    <div class="field" id="campo-transaccion" style="display:none;">
+      <label>Número de transacción</label>
+      <input type="text" id="num_transaccion" placeholder="Ej: 000123456">
+    </div>
+
+    <button class="primary" style="width:100%" onclick="confirmarPedido()">Registrar pedido</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let carrito = []; // {codigo, prenda, color, talla, precio, cantidad, disponible}
+let timeoutId = null;
+
+document.getElementById('metodo_pago').addEventListener('change', (e) => {
+  document.getElementById('campo-transaccion').style.display =
+    e.target.value === 'transferencia' ? 'block' : 'none';
+});
+
+async function buscar(q) {
+  const res = await fetch('/api/inventario');
+  const data = await res.json();
+  const cont = document.getElementById('resultados');
+  cont.innerHTML = '';
+  if (!data.ok) { showToast('Error: ' + data.error, 'error'); return; }
+
+  const ql = (q || '').toLowerCase();
+  const items = data.items.filter(i =>
+    !ql ||
+    (i.prenda || '').toLowerCase().includes(ql) ||
+    (i.color || '').toLowerCase().includes(ql) ||
+    (i.codigo || '').toLowerCase().includes(ql)
+  );
+
+  const tabla = document.createElement('table');
+  tabla.className = 'data-table';
+  tabla.innerHTML = `
+    <thead><tr><th>Prenda</th><th>Color</th><th>Talla</th><th>Precio</th><th>Disp.</th><th></th></tr></thead>
+    <tbody>${items.map(i => `
+      <tr>
+        <td>${i.prenda}</td>
+        <td>${i.color || '-'}</td>
+        <td>${i.talla || '-'}</td>
+        <td>$${(i.precio||0).toFixed(2)}</td>
+        <td class="badge-disponible ${i.disponible<=3?'low':'ok'}">${i.disponible}</td>
+        <td>
+          <button class="secondary" ${i.disponible<=0?'disabled':''}
+            onclick='agregarAlCarrito(${JSON.stringify(i)})'>Agregar</button>
+        </td>
+      </tr>
+    `).join('')}</tbody>
+  `;
+  cont.appendChild(tabla);
+}
+
+function agregarAlCarrito(item) {
+  const existente = carrito.find(c => c.codigo === item.codigo);
+  if (existente) {
+    if (existente.cantidad + 1 > item.disponible) {
+      showToast('No hay más stock disponible de este artículo', 'error');
+      return;
+    }
+    existente.cantidad += 1;
+  } else {
+    carrito.push({
+      codigo: item.codigo, prenda: item.prenda, color: item.color,
+      talla: item.talla, precio: item.precio, cantidad: 1, disponible: item.disponible
+    });
+  }
+  renderCarrito();
+}
+
+function cambiarCantidad(codigo, delta) {
+  const item = carrito.find(c => c.codigo === codigo);
+  if (!item) return;
+  const nueva = item.cantidad + delta;
+  if (nueva <= 0) {
+    carrito = carrito.filter(c => c.codigo !== codigo);
+  } else if (nueva > item.disponible) {
+    showToast('No hay más stock disponible', 'error');
+    return;
+  } else {
+    item.cantidad = nueva;
+  }
+  renderCarrito();
+}
+
+function quitarDelCarrito(codigo) {
+  carrito = carrito.filter(c => c.codigo !== codigo);
+  renderCarrito();
+}
+
+function renderCarrito() {
+  const cont = document.getElementById('carrito-items');
+  const vacio = document.getElementById('carrito-vacio');
+  cont.innerHTML = '';
+  if (carrito.length === 0) {
+    vacio.style.display = 'block';
+  } else {
+    vacio.style.display = 'none';
+    for (const item of carrito) {
+      const div = document.createElement('div');
+      div.className = 'carrito-item';
+      div.innerHTML = `
+        <div>
+          <strong>${item.prenda}</strong><br>
+          <span style="color:var(--muted)">${item.color || ''} · ${item.talla || ''} · $${item.precio.toFixed(2)}</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:6px;">
+          <button class="ghost" onclick="cambiarCantidad('${item.codigo}', -1)">−</button>
+          <span>${item.cantidad}</span>
+          <button class="ghost" onclick="cambiarCantidad('${item.codigo}', 1)">+</button>
+          <button class="remove" onclick="quitarDelCarrito('${item.codigo}')">×</button>
+        </div>
+      `;
+      cont.appendChild(div);
+    }
+  }
+  const total = carrito.reduce((s, i) => s + i.precio * i.cantidad, 0);
+  document.getElementById('total').textContent = '$' + total.toFixed(2);
+}
+
+async function confirmarPedido() {
+  const cliente = document.getElementById('cliente').value.trim();
+  const telefono = document.getElementById('telefono').value.trim();
+  const metodo_pago = document.getElementById('metodo_pago').value;
+  const num_transaccion = document.getElementById('num_transaccion').value.trim();
+
+  if (!cliente) { showToast('Ingresa el nombre del cliente', 'error'); return; }
+  if (carrito.length === 0) { showToast('Agrega al menos una prenda', 'error'); return; }
+  if (metodo_pago === 'transferencia' && !num_transaccion) {
+    showToast('Ingresa el número de transacción', 'error'); return;
+  }
+
+  const body = {
+    cliente, telefono, metodo_pago, num_transaccion,
+    items: carrito.map(c => ({
+      codigo: c.codigo, prenda: c.prenda, color: c.color,
+      talla: c.talla, precio: c.precio, cantidad: c.cantidad
+    }))
+  };
+
+  const res = await fetch('/api/pedido', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showToast('Pedido ' + data.pedido_id + ' registrado ✓', 'success');
+    carrito = [];
+    renderCarrito();
+    document.getElementById('cliente').value = '';
+    document.getElementById('telefono').value = '';
+    document.getElementById('num_transaccion').value = '';
+    buscar(document.getElementById('buscador').value);
+  } else {
+    showToast('Error: ' + data.error, 'error');
+  }
+}
+
+document.getElementById('buscador').addEventListener('input', (e) => {
+  clearTimeout(timeoutId);
+  timeoutId = setTimeout(() => buscar(e.target.value), 200);
+});
+
+buscar('');
+renderCarrito();
+</script>
+{% endblock %}

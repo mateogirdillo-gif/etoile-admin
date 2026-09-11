@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+{% block title %}Catálogo · Étoile{% endblock %}
+{% block content %}
+{% set active = 'catalogo' %}
+<h1 class="page-title">Catálogo e inventario</h1>
+<p class="page-sub">Busca por nombre de prenda para ver colores, tallas y stock disponible.</p>
+
+<div class="search-bar">
+  <input type="text" id="buscador" placeholder="Buscar prenda, ej: Blusa Ana..." style="flex:1">
+  <button class="secondary" onclick="limpiarBusqueda()">Limpiar</button>
+  <button class="primary" onclick="abrirModalAgregar()">+ Agregar prenda</button>
+</div>
+
+<div id="contenedor" class="card-grid"></div>
+<div id="vacio" class="empty-state" style="display:none">No se encontraron prendas.</div>
+
+<!-- Modal agregar prenda -->
+<div id="modal-agregar" style="display:none; position:fixed; inset:0; background:rgba(58,46,48,.45); z-index:50; align-items:center; justify-content:center;">
+  <div style="background:white; border-radius:16px; padding:26px; width:420px; max-width:92vw;">
+    <h3 style="font-family:'Playfair Display',serif; margin-top:0;">Agregar prenda / variante</h3>
+
+    <div class="field">
+      <label>Nombre de la prenda</label>
+      <input type="text" id="np_prenda" placeholder="Ej: Blusa Camila" list="lista-prendas">
+      <datalist id="lista-prendas"></datalist>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <div class="field" style="flex:1;">
+        <label>Color</label>
+        <input type="text" id="np_color" placeholder="Ej: Negro">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Talla</label>
+        <input type="text" id="np_talla" placeholder="Ej: S, M, L">
+      </div>
+    </div>
+    <div style="display:flex; gap:10px;">
+      <div class="field" style="flex:1;">
+        <label>Precio</label>
+        <input type="number" id="np_precio" step="0.01" min="0" placeholder="0.00">
+      </div>
+      <div class="field" style="flex:1;">
+        <label>Stock inicial</label>
+        <input type="number" id="np_stock" min="0" step="1" placeholder="0">
+      </div>
+    </div>
+    <div class="field">
+      <label>Código (se sugiere solo, puedes editarlo)</label>
+      <input type="text" id="np_codigo" placeholder="Se genera automáticamente">
+    </div>
+
+    <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:16px;">
+      <button class="ghost" onclick="cerrarModalAgregar()">Cancelar</button>
+      <button class="primary" onclick="guardarPrenda()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let timeoutId = null;
+
+function badgeClase(disponible) {
+  if (disponible <= 0) return 'low';
+  if (disponible <= 3) return 'low';
+  return 'ok';
+}
+
+async function cargarPrendas(q) {
+  const res = await fetch('/api/prendas' + (q ? '?q=' + encodeURIComponent(q) : ''));
+  const data = await res.json();
+  const cont = document.getElementById('contenedor');
+  const vacio = document.getElementById('vacio');
+  cont.innerHTML = '';
+
+  if (!data.ok) {
+    showToast('Error cargando catálogo: ' + data.error, 'error');
+    return;
+  }
+
+  if (data.prendas.length === 0) {
+    vacio.style.display = 'block';
+    return;
+  }
+  vacio.style.display = 'none';
+
+  for (const p of data.prendas) {
+    const card = document.createElement('div');
+    card.className = 'prenda-card';
+
+    const filas = p.variantes.map(v => `
+      <tr>
+        <td>${v.color || '-'}</td>
+        <td>${v.talla || '-'}</td>
+        <td>$${(v.precio || 0).toFixed(2)}</td>
+        <td>
+          <input type="number" min="0" value="${v.stock}" data-codigo="${v.codigo}" class="stock-input" />
+        </td>
+        <td class="badge-disponible ${badgeClase(v.disponible)}">${v.disponible}</td>
+      </tr>
+    `).join('');
+
+    card.innerHTML = `
+      <h3>${p.prenda}</h3>
+      <div class="precio">desde $${(p.precio || 0).toFixed(2)}</div>
+      <div>
+        ${p.colores.map(c => `<span class="chip">${c}</span>`).join('')}
+      </div>
+      <div>
+        ${p.tallas.map(t => `<span class="chip">${t}</span>`).join('')}
+      </div>
+      <table class="variantes-table">
+        <thead>
+          <tr><th>Color</th><th>Talla</th><th>Precio</th><th>Stock</th><th>Disp.</th></tr>
+        </thead>
+        <tbody>${filas}</tbody>
+      </table>
+    `;
+    cont.appendChild(card);
+  }
+
+  document.querySelectorAll('.stock-input').forEach(inp => {
+    inp.addEventListener('change', async (e) => {
+      const codigo = e.target.dataset.codigo;
+      const stock = e.target.value;
+      const res = await fetch('/api/stock', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({codigo, stock})
+      });
+      const d = await res.json();
+      if (d.ok) {
+        showToast('Stock actualizado', 'success');
+        cargarPrendas(document.getElementById('buscador').value);
+      } else {
+        showToast('Error: ' + d.error, 'error');
+      }
+    });
+  });
+}
+
+document.getElementById('buscador').addEventListener('input', (e) => {
+  clearTimeout(timeoutId);
+  timeoutId = setTimeout(() => cargarPrendas(e.target.value), 250);
+});
+
+function limpiarBusqueda() {
+  document.getElementById('buscador').value = '';
+  cargarPrendas('');
+}
+
+// -------------------- Modal agregar prenda --------------------
+
+let codigoTocadoManualmente = false;
+let sugerirTimeout = null;
+
+async function cargarNombresPrendas() {
+  const res = await fetch('/api/prendas_nombres');
+  const data = await res.json();
+  if (!data.ok) return;
+  const dl = document.getElementById('lista-prendas');
+  dl.innerHTML = data.nombres.map(n => `<option value="${n}">`).join('');
+}
+
+function abrirModalAgregar() {
+  document.getElementById('np_prenda').value = '';
+  document.getElementById('np_color').value = '';
+  document.getElementById('np_talla').value = '';
+  document.getElementById('np_precio').value = '';
+  document.getElementById('np_stock').value = '';
+  document.getElementById('np_codigo').value = '';
+  codigoTocadoManualmente = false;
+  cargarNombresPrendas();
+  document.getElementById('modal-agregar').style.display = 'flex';
+}
+
+function cerrarModalAgregar() {
+  document.getElementById('modal-agregar').style.display = 'none';
+}
+
+async function actualizarSugerenciaCodigo() {
+  if (codigoTocadoManualmente) return;
+  const prenda = document.getElementById('np_prenda').value.trim();
+  const color = document.getElementById('np_color').value.trim();
+  const talla = document.getElementById('np_talla').value.trim();
+  if (!prenda) return;
+  const params = new URLSearchParams({prenda, color, talla});
+  const res = await fetch('/api/sugerir_codigo?' + params.toString());
+  const data = await res.json();
+  if (data.ok) {
+    document.getElementById('np_codigo').value = data.codigo;
+  }
+}
+
+['np_prenda', 'np_color', 'np_talla'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    clearTimeout(sugerirTimeout);
+    sugerirTimeout = setTimeout(actualizarSugerenciaCodigo, 300);
+  });
+});
+
+document.getElementById('np_codigo').addEventListener('input', () => {
+  codigoTocadoManualmente = true;
+});
+
+async function guardarPrenda() {
+  const body = {
+    prenda: document.getElementById('np_prenda').value.trim(),
+    color: document.getElementById('np_color').value.trim(),
+    talla: document.getElementById('np_talla').value.trim(),
+    precio: parseFloat(document.getElementById('np_precio').value),
+    stock: parseInt(document.getElementById('np_stock').value || '0', 10),
+    codigo: document.getElementById('np_codigo').value.trim(),
+  };
+
+  if (!body.prenda) { showToast('Ingresa el nombre de la prenda', 'error'); return; }
+  if (isNaN(body.precio) || body.precio < 0) { showToast('Ingresa un precio válido', 'error'); return; }
+  if (isNaN(body.stock) || body.stock < 0) { showToast('Ingresa un stock válido', 'error'); return; }
+
+  const res = await fetch('/api/prenda', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  });
+  const data = await res.json();
+  if (data.ok) {
+    showToast('Prenda agregada: ' + data.codigo, 'success');
+    cerrarModalAgregar();
+    cargarPrendas(document.getElementById('buscador').value);
+  } else {
+    showToast('Error: ' + data.error, 'error');
+  }
+}
+
+cargarPrendas('');
+</script>
+{% endblock %}

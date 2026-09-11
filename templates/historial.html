@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Historial · Étoile{% endblock %}
+{% block content %}
+{% set active = 'historial' %}
+<h1 class="page-title">Historial de pedidos</h1>
+<p class="page-sub">Todo lo registrado, con método de pago y número de transacción.</p>
+
+<div class="filters-row">
+  <div class="field" style="margin:0;">
+    <label>Desde</label>
+    <input type="date" id="f_desde">
+  </div>
+  <div class="field" style="margin:0;">
+    <label>Hasta</label>
+    <input type="date" id="f_hasta">
+  </div>
+  <div class="field" style="margin:0;">
+    <label>Cliente</label>
+    <input type="text" id="f_cliente" placeholder="Nombre...">
+  </div>
+  <div class="field" style="margin:0;">
+    <label>Código de prenda</label>
+    <input type="text" id="f_codigo" placeholder="Ej: BLAN-NE-S">
+  </div>
+  <button class="primary" onclick="cargarHistorial()">Filtrar</button>
+  <button class="secondary" onclick="limpiarFiltros()">Limpiar</button>
+</div>
+
+<div class="total-general-bar">
+  <span>Total en el período filtrado</span>
+  <span id="total-general">$0.00</span>
+</div>
+
+<div id="pedidos"></div>
+<div id="vacio" class="empty-state" style="display:none;">No hay pedidos que coincidan con el filtro.</div>
+
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+async function cargarHistorial() {
+  const params = new URLSearchParams();
+  const desde = document.getElementById('f_desde').value;
+  const hasta = document.getElementById('f_hasta').value;
+  const cliente = document.getElementById('f_cliente').value;
+  const codigo = document.getElementById('f_codigo').value;
+  if (desde) params.set('desde', desde);
+  if (hasta) params.set('hasta', hasta);
+  if (cliente) params.set('cliente', cliente);
+  if (codigo) params.set('codigo', codigo);
+
+  const res = await fetch('/api/historial?' + params.toString());
+  const data = await res.json();
+  const cont = document.getElementById('pedidos');
+  const vacio = document.getElementById('vacio');
+  cont.innerHTML = '';
+
+  if (!data.ok) { showToast('Error: ' + data.error, 'error'); return; }
+
+  document.getElementById('total-general').textContent = '$' + data.total_general.toFixed(2);
+
+  if (data.pedidos.length === 0) {
+    vacio.style.display = 'block';
+    return;
+  }
+  vacio.style.display = 'none';
+
+  for (const p of data.pedidos) {
+    const det = document.createElement('details');
+    det.className = 'pedido-group';
+    const pillClase = (p.metodo_pago === 'efectivo') ? 'efectivo' : 'transferencia';
+    const pillTexto = (p.metodo_pago === 'efectivo') ? 'Efectivo' : 'Transferencia';
+
+    det.innerHTML = `
+      <summary>
+        <div>
+          <strong>${p.pedido_id}</strong> — ${p.cliente || 'Sin nombre'}
+          <div style="color:var(--muted); font-size:12px; margin-top:2px;">${p.fecha || ''} ${p.telefono ? '· ' + p.telefono : ''}</div>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+          <span class="pill-pago ${pillClase}">${pillTexto}${p.metodo_pago==='transferencia' && p.num_transaccion ? ' · '+p.num_transaccion : ''}</span>
+          <strong>$${p.total.toFixed(2)}</strong>
+        </div>
+      </summary>
+      <div class="pedido-body">
+        <table class="data-table">
+          <thead><tr><th>Prenda</th><th>Color</th><th>Talla</th><th>Cant.</th><th>Precio</th><th>Subtotal</th></tr></thead>
+          <tbody>
+            ${p.items.map(it => `
+              <tr>
+                <td>${it.prenda}</td>
+                <td>${it.color || '-'}</td>
+                <td>${it.talla || '-'}</td>
+                <td>${it.cant}</td>
+                <td>$${(it.precio||0).toFixed(2)}</td>
+                <td>$${(it.subtotal||0).toFixed(2)}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+    cont.appendChild(det);
+  }
+}
+
+function limpiarFiltros() {
+  document.getElementById('f_desde').value = '';
+  document.getElementById('f_hasta').value = '';
+  document.getElementById('f_cliente').value = '';
+  document.getElementById('f_codigo').value = '';
+  cargarHistorial();
+}
+
+cargarHistorial();
+</script>
+{% endblock %}
