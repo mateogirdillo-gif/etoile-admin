@@ -59,12 +59,12 @@ HIST_COLS = {
 def _backup():
     os.makedirs(BACKUP_DIR, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    dest = os.path.join(BACKUP_DIR, f"Sistema_Etoile_{stamp}.xlsx")
+    dest = os.path.join(BACKUP_DIR, f"Sistema_Etoile_2_{stamp}.xlsx")
     try:
         shutil.copy2(EXCEL_PATH, dest)
         # mantener solo los últimos 30 backups
         backups = sorted(
-            f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_")
+            f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_2_")
         )
         for old in backups[:-30]:
             os.remove(os.path.join(BACKUP_DIR, old))
@@ -489,11 +489,6 @@ def get_pedidos_agrupados(desde=None, hasta=None, cliente=None, codigo=None):
                 "total": 0,
             }
         pedidos[pid]["items"].append(h)
-        pedidos[pid]["total"] += h["subtotal"] or 0
-
-    resultado = list(pedidos.values())
-    resultado.sort(key=lambda p: p["fecha"] or "", reverse=True)
-    return resultado
         pedidos[pid]["total"] += h["subtotal"] or 0
 
     resultado = list(pedidos.values())
