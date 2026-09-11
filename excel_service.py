@@ -123,7 +123,7 @@ def get_inventario_raw(wb=None):
                 "color": _resolver_celda(ws, row, INV_COLS["COLOR"]),
                 "talla": _resolver_celda(ws, row, INV_COLS["TALLA"]),
                 "precio": ws.cell(row=row, column=INV_COLS["PRECIO"]).value or 0,
-                "stock": ws.cell(row=row, column=INV_COLS["STOCK"]).value or 0,
+                "stock": ws.cell(row=row, column=INV_COLS["STOCK"]).value or 099,
                 "_row": row,
             }
         )
