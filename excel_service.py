@@ -28,7 +28,7 @@ _lock = threading.Lock()
 
 INV_HEADER_ROW = 3
 INV_FIRST_DATA_ROW = 4
-INV_COLS = {"CODIGO": 1, "PRENDA": 2, "COLOR": 3, "TALLA": 4, "PRECIO": 5, "STOCK": 6}
+INV_COLS = {"CODIGO": 1, "PRENDA": 2, "COLOR": 3, "TALLA": 4, "PRECIO": 5}
 
 HIST_HEADER_ROW = 4
 HIST_FIRST_DATA_ROW = 5
@@ -64,7 +64,7 @@ def _backup():
         shutil.copy2(EXCEL_PATH, dest)
         # mantener solo los últimos 30 backups
         backups = sorted(
-            f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_")
+            f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_2")
         )
         for old in backups[:-30]:
             os.remove(os.path.join(BACKUP_DIR, old))
