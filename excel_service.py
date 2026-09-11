@@ -28,7 +28,7 @@ _lock = threading.Lock()
 
 INV_HEADER_ROW = 3
 INV_FIRST_DATA_ROW = 4
-INV_COLS = {"CODIGO": 1, "PRENDA": 2, "COLOR": 3, "TALLA": 4, "PRECIO": 5}
+INV_COLS = {"CODIGO": 1, "PRENDA": 2, "COLOR": 3, "TALLA": 4, "PRECIO": 5, "STOCK": 6}
 
 HIST_HEADER_ROW = 4
 HIST_FIRST_DATA_ROW = 5
@@ -64,7 +64,7 @@ def _backup():
         shutil.copy2(EXCEL_PATH, dest)
         # mantener solo los últimos 30 backups
         backups = sorted(
-            f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_2")
+            f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_")
         )
         for old in backups[:-30]:
             os.remove(os.path.join(BACKUP_DIR, old))
@@ -122,8 +122,8 @@ def get_inventario_raw(wb=None):
                 "prenda": _resolver_celda(ws, row, INV_COLS["PRENDA"]),
                 "color": _resolver_celda(ws, row, INV_COLS["COLOR"]),
                 "talla": _resolver_celda(ws, row, INV_COLS["TALLA"]),
-                "precio": ws.cell(row=row, column=INV_COLS["PRECIO"]).value or 0
-                "stock": ws.cell(row=row, column=INV_COLS["STOCK"]).value or 99,
+                "precio": ws.cell(row=row, column=INV_COLS["PRECIO"]).value or 0,
+                "stock": ws.cell(row=row, column=INV_COLS["STOCK"]).value or 0,
                 "_row": row,
             }
         )
@@ -214,6 +214,7 @@ def get_prendas_agrupadas(busqueda=None):
                 "colores": colores,
                 "tallas": tallas,
                 "precio": precio,
+                "total_disponible": total_disponible,
                 "variantes": variantes,
             }
         )
@@ -488,6 +489,11 @@ def get_pedidos_agrupados(desde=None, hasta=None, cliente=None, codigo=None):
                 "total": 0,
             }
         pedidos[pid]["items"].append(h)
+        pedidos[pid]["total"] += h["subtotal"] or 0
+
+    resultado = list(pedidos.values())
+    resultado.sort(key=lambda p: p["fecha"] or "", reverse=True)
+    return resultado
         pedidos[pid]["total"] += h["subtotal"] or 0
 
     resultado = list(pedidos.values())
