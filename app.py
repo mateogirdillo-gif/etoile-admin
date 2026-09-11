@@ -140,15 +140,6 @@ def api_historial():
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
-
-@app.route("/api/pedido/<pedido_id>", methods=["DELETE"])
-def api_eliminar_pedido(pedido_id):
-    try:
-        eliminar_pedido(pedido_id)
-        return jsonify({"ok": True, "mensaje": f"Pedido {pedido_id} eliminado exitosamente."})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 400
-
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     debug = os.environ.get("FLASK_DEBUG", "1") == "1"
