@@ -20,7 +20,7 @@ import openpyxl
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 EXCEL_PATH = os.environ.get(
-    "ETOILE_EXCEL_PATH", os.path.join(BASE_DIR, "data", "Sistema_Etoile.xlsx")
+    "ETOILE_EXCEL_PATH", os.path.join(BASE_DIR, "data", "Sistema_Etoile_2.xlsx")
 )
 BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
 
