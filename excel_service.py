@@ -407,6 +407,91 @@ def get_pedidos_agrupados(desde=None, hasta=None, cliente=None, codigo=None):
         pedidos[pid]["items"].append(h)
         pedidos[pid]["total"] += h["subtotal"] or 0
 
+
+    def eliminar_pedido(pedido_id):
+    """
+    Elimina del HISTORIAL todas las filas asociadas al pedido_id indicado.
+    Reorganiza las filas para mantener el rango de 5 a 204 limpio y sin huecos,
+    reponiendo las fórmulas por defecto en las celdas liberadas.
+    """
+    pedido_id = str(pedido_id).strip()
+    if not pedido_id:
+        raise ValueError("ID de pedido no especificado.")
+
+    with _lock:
+        wb = _load(data_only=False)
+        ws = wb["HISTORIAL"]
+
+        # 1. Leer todas las filas reales existentes
+        filas_conservadas = []
+        encontrado = False
+
+        for row in range(HIST_FIRST_DATA_ROW, HIST_LAST_DATA_ROW + 1):
+            cod = ws.cell(row=row, column=HIST_COLS["CODIGO"]).value
+            # Si no hay código o es fórmula no evaluada, no es dato real
+            if not cod or (isinstance(cod, str) and cod.startswith("=")):
+                continue
+
+            pid = ws.cell(row=row, column=HIST_COLS["PEDIDO_ID"]).value
+            if str(pid or "").strip() == pedido_id:
+                encontrado = True
+            else:
+                # Guardamos los valores de la fila que NO se elimina (columnas 1 a 13)
+                valores_fila = [ws.cell(row=row, column=c).value for c in range(1, 14)]
+                filas_conservadas.append(valores_fila)
+
+        if not encontrado:
+            wb.close()
+            raise ValueError(f"No se encontró el pedido '{pedido_id}' para eliminar.")
+
+        # 2. Reescribir las filas conservadas desde HIST_FIRST_DATA_ROW en adelante
+        curr_row = HIST_FIRST_DATA_ROW
+        for fila_val in filas_conservadas:
+            for col_idx, val in enumerate(fila_val, start=1):
+                ws.cell(row=curr_row, column=col_idx, value=val)
+            curr_row += 1
+
+        # 3. Limpiar y restaurar fórmulas en las filas que quedaron vacías
+        for row in range(curr_row, HIST_LAST_DATA_ROW + 1):
+            ws.cell(row=row, column=HIST_COLS["FECHA"], value=None)
+            ws.cell(row=row, column=HIST_COLS["CODIGO"], value=None)
+            ws.cell(
+                row=row,
+                column=HIST_COLS["PRENDA"],
+                value=f'=IF(B{row}="","",IFERROR(INDEX(INVENTARIO!$B:$B,MATCH(B{row},INVENTARIO!$A:$A,0)),"No encontrado"))'
+            )
+            ws.cell(
+                row=row,
+                column=HIST_COLS["COLOR"],
+                value=f'=IF(B{row}="","",IFERROR(INDEX(INVENTARIO!$C:$C,MATCH(B{row},INVENTARIO!$A:$A,0)),""))'
+            )
+            ws.cell(
+                row=row,
+                column=HIST_COLS["TALLA"],
+                value=f'=IF(B{row}="","",IFERROR(INDEX(INVENTARIO!$D:$D,MATCH(B{row},INVENTARIO!$A:$A,0)),""))'
+            )
+            ws.cell(row=row, column=HIST_COLS["CANT"], value=None)
+            ws.cell(
+                row=row,
+                column=HIST_COLS["PRECIO"],
+                value=f'=IF(B{row}="","",IFERROR(INDEX(INVENTARIO!$E:$E,MATCH(B{row},INVENTARIO!$A:$A,0)),""))'
+            )
+            ws.cell(
+                row=row,
+                column=HIST_COLS["SUBTOTAL"],
+                value=f'=IF(B{row}="","",G{row}*F{row})'
+            )
+            ws.cell(row=row, column=HIST_COLS["CLIENTE"], value=None)
+            ws.cell(row=row, column=HIST_COLS["PEDIDO_ID"], value=None)
+            ws.cell(row=row, column=HIST_COLS["TELEFONO"], value=None)
+            ws.cell(row=row, column=HIST_COLS["METODO_PAGO"], value=None)
+            ws.cell(row=row, column=HIST_COLS["NUM_TRANSACCION"], value=None)
+
+        _backup()
+        wb.save(EXCEL_PATH)
+        wb.close()
+
+    return True
     resultado = list(pedidos.values())
     resultado.sort(key=lambda p: p["fecha"] or "", reverse=True)
     return resultado
