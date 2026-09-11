@@ -122,8 +122,7 @@ def get_inventario_raw(wb=None):
                 "prenda": _resolver_celda(ws, row, INV_COLS["PRENDA"]),
                 "color": _resolver_celda(ws, row, INV_COLS["COLOR"]),
                 "talla": _resolver_celda(ws, row, INV_COLS["TALLA"]),
-                "precio": ws.cell(row=row, column=INV_COLS["PRECIO"]).value or 0,
-                "stock": ws.cell(row=row, column=INV_COLS["STOCK"]).value or 0,
+                "precio": ws.cell(row=row, column=INV_COLS["PRECIO"]).value or 0
                 "_row": row,
             }
         )
@@ -214,7 +213,6 @@ def get_prendas_agrupadas(busqueda=None):
                 "colores": colores,
                 "tallas": tallas,
                 "precio": precio,
-                "total_disponible": total_disponible,
                 "variantes": variantes,
             }
         )
