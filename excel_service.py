@@ -1,24 +1,22 @@
 """
-Capa de acceso al Excel. Todo lo que la app necesita leer o escribir
-sobre Sistema_Etoile.xlsx pasa por aquí.
+Capa de acceso al Excel adaptada a Sistema_Etoile_2.xlsx (Tienda Virtual).
+Sin control de stock físico.
 
-Diseño:
-- INVENTARIO es el catálogo maestro: CODIGO, PRENDA, COLOR, TALLA, PRECIO, STOCK
-- HISTORIAL es el registro de cada prenda vendida (una fila por prenda, agrupadas
-  por PEDIDO_ID cuando vienen del mismo pedido).
-- El "disponible" de una prenda = STOCK (en INVENTARIO) - suma de CANT vendidas
-  en HISTORIAL para ese mismo CODIGO. Así el stock en INVENTARIO nunca se
-  edita automáticamente al vender; solo se resta en la lectura. Esto evita
-  perder el número real de piezas que compraste si algo falla a mitad de un guardado.
+Estructura:
+- INVENTARIO: CODIGO, PRENDA, COLOR, TALLA, PRECIO (Filas desde la 4 hasta la 144+)
+- HISTORIAL: Registro de ventas (Filas de datos entre la 5 y la 204).
 """
 import os
 import shutil
 import threading
 from datetime import datetime
-
+import re
 import openpyxl
+from openpyxl.utils import column_index_from_string
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Nombre y ruta del nuevo archivo Excel
 EXCEL_PATH = os.environ.get(
     "ETOILE_EXCEL_PATH", os.path.join(BASE_DIR, "data", "Sistema_Etoile_2.xlsx")
 )
@@ -26,18 +24,20 @@ BACKUP_DIR = os.path.join(BASE_DIR, "data", "backups")
 
 _lock = threading.Lock()
 
+# Configuración de INVENTARIO (según Sistema_Etoile_2.xlsx)
 INV_HEADER_ROW = 3
 INV_FIRST_DATA_ROW = 4
-INV_COLS = {"CODIGO": 1, "PRENDA": 2, "COLOR": 3, "TALLA": 4, "PRECIO": 5, "STOCK": 6}
+INV_COLS = {
+    "CODIGO": 1,
+    "PRENDA": 2,
+    "COLOR": 3,
+    "TALLA": 4,
+    "PRECIO": 5,
+}
 
+# Configuración de HISTORIAL
 HIST_HEADER_ROW = 4
 HIST_FIRST_DATA_ROW = 5
-# La hoja HISTORIAL tiene, más abajo, una sección de "RESUMEN" con fórmulas
-# (empieza alrededor de la fila 211) que NO son pedidos reales. Los datos de
-# pedidos reales viven solo entre HIST_FIRST_DATA_ROW y HIST_LAST_DATA_ROW,
-# el mismo rango que usan las fórmulas de resumen del propio Excel
-# (ej. SUMIFS($F$5:$F$204,...)). Si algún día se llenan más de estas filas,
-# hay que ampliar este número (y las fórmulas del RESUMEN) antes de que choquen.
 HIST_LAST_DATA_ROW = 204
 HIST_COLS = {
     "FECHA": 1,
@@ -55,6 +55,8 @@ HIST_COLS = {
     "NUM_TRANSACCION": 13,
 }
 
+_REF_SIMPLE = re.compile(r"^=([A-Z]+)(\d+)$")
+
 
 def _backup():
     os.makedirs(BACKUP_DIR, exist_ok=True)
@@ -62,7 +64,6 @@ def _backup():
     dest = os.path.join(BACKUP_DIR, f"Sistema_Etoile_2_{stamp}.xlsx")
     try:
         shutil.copy2(EXCEL_PATH, dest)
-        # mantener solo los últimos 30 backups
         backups = sorted(
             f for f in os.listdir(BACKUP_DIR) if f.startswith("Sistema_Etoile_2_")
         )
@@ -76,20 +77,7 @@ def _load(data_only=False):
     return openpyxl.load_workbook(EXCEL_PATH, data_only=data_only)
 
 
-import re
-
-_REF_SIMPLE = re.compile(r"^=([A-Z]+)(\d+)$")
-
-
 def _resolver_celda(ws, row, col, visitados=None):
-    """
-    Si la celda tiene una fórmula simple de referencia directa (ej. '=B29'),
-    sigue la cadena y devuelve el valor literal. Si es una fórmula más
-    compleja (que no debería aparecer en INVENTARIO), devuelve None en vez
-    de romper la app.
-    """
-    from openpyxl.utils import column_index_from_string
-
     if visitados is None:
         visitados = set()
     val = ws.cell(row=row, column=col).value
@@ -107,9 +95,9 @@ def _resolver_celda(ws, row, col, visitados=None):
 
 
 def get_inventario_raw(wb=None):
-    """Lee INVENTARIO tal cual está en el Excel (sin calcular disponible)."""
+    """Lee el catálogo de productos tal cual está en el nuevo Excel."""
     own = wb is None
-    wb = wb or _load()
+    wb = wb or _load(data_only=True)
     ws = wb["INVENTARIO"]
     items = []
     for row in range(INV_FIRST_DATA_ROW, ws.max_row + 1):
@@ -123,7 +111,6 @@ def get_inventario_raw(wb=None):
                 "color": _resolver_celda(ws, row, INV_COLS["COLOR"]),
                 "talla": _resolver_celda(ws, row, INV_COLS["TALLA"]),
                 "precio": ws.cell(row=row, column=INV_COLS["PRECIO"]).value or 0,
-                "stock": ws.cell(row=row, column=INV_COLS["STOCK"]).value or 099,
                 "_row": row,
             }
         )
@@ -133,8 +120,9 @@ def get_inventario_raw(wb=None):
 
 
 def get_historial_raw(wb=None):
+    """Lee el registro de ventas en HISTORIAL."""
     own = wb is None
-    wb = wb or _load()
+    wb = wb or _load(data_only=True)
     ws = wb["HISTORIAL"]
     items = []
     for row in range(HIST_FIRST_DATA_ROW, HIST_LAST_DATA_ROW + 1):
@@ -166,9 +154,9 @@ def get_historial_raw(wb=None):
 
 
 def get_inventario_con_disponible():
-    """Devuelve INVENTARIO con 'disponible' calculado = stock - vendido."""
+    """Calcula unidades vendidas por producto (sin limitar por stock)."""
     with _lock:
-        wb = _load()
+        wb = _load(data_only=True)
         inventario = get_inventario_raw(wb)
         historial = get_historial_raw(wb)
         wb.close()
@@ -180,18 +168,13 @@ def get_inventario_con_disponible():
         )
 
     for item in inventario:
-        vendido = vendido_por_codigo.get(item["codigo"], 0)
-        item["vendido"] = vendido
-        item["disponible"] = max(0, (item["stock"] or 0) - vendido)
+        item["vendido"] = vendido_por_codigo.get(item["codigo"], 0)
 
     return inventario
 
 
 def get_prendas_agrupadas(busqueda=None):
-    """
-    Agrupa el inventario por PRENDA -> lista de variantes (color, talla, precio, disponible).
-    Si se pasa busqueda, filtra por nombre de prenda (contiene, insensible a mayúsculas).
-    """
+    """Agrupa las variantes por tipo de prenda."""
     inventario = get_inventario_con_disponible()
     if busqueda:
         b = busqueda.strip().lower()
@@ -206,7 +189,6 @@ def get_prendas_agrupadas(busqueda=None):
     for nombre, variantes in sorted(agrupado.items()):
         colores = sorted(set(v["color"] for v in variantes if v["color"]))
         tallas = sorted(set(v["talla"] for v in variantes if v["talla"]))
-        total_disponible = sum(v["disponible"] for v in variantes)
         precio = variantes[0]["precio"] if variantes else 0
         resultado.append(
             {
@@ -214,45 +196,18 @@ def get_prendas_agrupadas(busqueda=None):
                 "colores": colores,
                 "tallas": tallas,
                 "precio": precio,
-                "total_disponible": total_disponible,
                 "variantes": variantes,
             }
         )
     return resultado
 
 
-def actualizar_stock(codigo, nuevo_stock):
-    with _lock:
-        wb = _load()
-        ws = wb["INVENTARIO"]
-        encontrado = False
-        for row in range(INV_FIRST_DATA_ROW, ws.max_row + 1):
-            c = ws.cell(row=row, column=INV_COLS["CODIGO"]).value
-            if c and str(c).strip() == str(codigo).strip():
-                ws.cell(row=row, column=INV_COLS["STOCK"], value=int(nuevo_stock))
-                encontrado = True
-                break
-        if not encontrado:
-            wb.close()
-            raise ValueError(f"Código {codigo} no encontrado en INVENTARIO")
-        _backup()
-        wb.save(EXCEL_PATH)
-        wb.close()
-    return True
-
-
 def _abreviar(texto, largo):
-    """Toma las primeras letras alfanuméricas de un texto y las pone en mayúsculas."""
     limpio = "".join(ch for ch in (texto or "") if ch.isalnum())
     return limpio[:largo].upper() if limpio else "XX"
 
 
 def sugerir_codigo(prenda, color, talla, wb=None):
-    """
-    Genera un código sugerido siguiendo el mismo patrón que ya usa el Excel,
-    ej. 'Blusa Eliana' + 'Vino' + 'S' -> 'BLEL-VI-S'.
-    Si ya existe, le agrega un número al final hasta encontrar uno libre.
-    """
     palabras = [p for p in (prenda or "").split() if p]
     if len(palabras) >= 2:
         prendaAbrev = _abreviar(palabras[0], 2) + _abreviar(palabras[1], 2)
@@ -283,7 +238,6 @@ def sugerir_codigo(prenda, color, talla, wb=None):
 
 
 def get_prendas_nombres():
-    """Nombres de prenda ya existentes, para sugerir/reusar en el formulario de alta."""
     inventario = get_inventario_raw()
     nombres = sorted(
         set(
@@ -295,12 +249,8 @@ def get_prendas_nombres():
     return nombres
 
 
-def agregar_prenda(prenda, color, talla, precio, stock, codigo=None):
-    """
-    Agrega una nueva variante (fila) a INVENTARIO. Si no se da codigo, se
-    autogenera. Si el codigo dado ya existe, se rechaza (para no pisar una
-    variante existente sin querer; para eso está actualizar_stock).
-    """
+def agregar_prenda(prenda, color, talla, precio, codigo=None):
+    """Agrega una nueva fila al catálogo INVENTARIO sin campo stock."""
     prenda = (prenda or "").strip()
     color = (color or "").strip()
     talla = (talla or "").strip()
@@ -309,8 +259,6 @@ def agregar_prenda(prenda, color, talla, precio, stock, codigo=None):
         raise ValueError("Falta el nombre de la prenda")
     if precio is None or float(precio) < 0:
         raise ValueError("Precio inválido")
-    if stock is None or int(stock) < 0:
-        raise ValueError("Stock inválido")
 
     with _lock:
         wb = _load()
@@ -322,14 +270,11 @@ def agregar_prenda(prenda, color, talla, precio, stock, codigo=None):
             codigo = codigo.strip().upper()
             if codigo in existentes:
                 wb.close()
-                raise ValueError(
-                    f"El código {codigo} ya existe. Usa 'Actualizar stock' si "
-                    "quieres modificar esa variante, o elige otro código."
-                )
+                raise ValueError(f"El código {codigo} ya existe.")
         else:
             codigo = sugerir_codigo(prenda, color, talla, wb)
 
-        # primera fila libre después de los datos existentes
+        # Buscar la primera fila libre
         fila = INV_FIRST_DATA_ROW
         for row in range(INV_FIRST_DATA_ROW, ws.max_row + 2):
             if not ws.cell(row=row, column=INV_COLS["CODIGO"]).value:
@@ -343,7 +288,6 @@ def agregar_prenda(prenda, color, talla, precio, stock, codigo=None):
         ws.cell(row=fila, column=INV_COLS["COLOR"], value=color)
         ws.cell(row=fila, column=INV_COLS["TALLA"], value=talla)
         ws.cell(row=fila, column=INV_COLS["PRECIO"], value=float(precio))
-        ws.cell(row=fila, column=INV_COLS["STOCK"], value=int(stock))
 
         _backup()
         wb.save(EXCEL_PATH)
@@ -368,10 +312,8 @@ def siguiente_pedido_id(wb):
 
 def crear_pedido(cliente, telefono, items, metodo_pago, num_transaccion):
     """
-    items: lista de {codigo, prenda, color, talla, precio, cantidad}
-    metodo_pago: 'efectivo' | 'transferencia'
-    num_transaccion: string o None (obligatorio si es transferencia)
-    Valida disponibilidad antes de escribir. Devuelve el pedido_id creado.
+    Crea el pedido y registra la venta en HISTORIAL.
+    Ya no restringe ni bloquea compras por stock.
     """
     if not items:
         raise ValueError("El pedido no tiene prendas")
@@ -383,32 +325,11 @@ def crear_pedido(cliente, telefono, items, metodo_pago, num_transaccion):
     with _lock:
         wb = _load()
         ws_hist = wb["HISTORIAL"]
-        inventario = get_inventario_raw(wb)
-        historial = get_historial_raw(wb)
-
-        stock_por_codigo = {i["codigo"]: i["stock"] for i in inventario}
-        vendido_por_codigo = {}
-        for h in historial:
-            vendido_por_codigo[h["codigo"]] = vendido_por_codigo.get(h["codigo"], 0) + (
-                h["cant"] or 0
-            )
-
-        # validar disponibilidad
-        for it in items:
-            codigo = it["codigo"]
-            disponible = stock_por_codigo.get(codigo, 0) - vendido_por_codigo.get(codigo, 0)
-            if it["cantidad"] > disponible:
-                wb.close()
-                raise ValueError(
-                    f"Stock insuficiente para {codigo} ({it.get('prenda','')} "
-                    f"{it.get('color','')} {it.get('talla','')}): "
-                    f"disponible {disponible}, pedido {it['cantidad']}"
-                )
 
         pedido_id = siguiente_pedido_id(wb)
         fecha = datetime.now().strftime("%Y-%m-%d %H:%M")
 
-        # buscar la primera fila realmente libre dentro del rango de datos reales
+        # Buscar la primera fila libre antes de la fila de resumen (204)
         fila = None
         for row in range(HIST_FIRST_DATA_ROW, HIST_LAST_DATA_ROW + 1):
             valor = ws_hist.cell(row=row, column=HIST_COLS["CODIGO"]).value
@@ -416,17 +337,12 @@ def crear_pedido(cliente, telefono, items, metodo_pago, num_transaccion):
                 fila = row
                 break
 
-        filas_libres = fila is not None and (
-            HIST_LAST_DATA_ROW - fila + 1
-        ) >= len(items)
+        filas_libres = fila is not None and (HIST_LAST_DATA_ROW - fila + 1) >= len(items)
 
         if fila is None or not filas_libres:
             wb.close()
             raise ValueError(
-                "La hoja HISTORIAL se quedó sin filas libres en su rango de datos "
-                f"(hasta la fila {HIST_LAST_DATA_ROW}). Hay que ampliar el rango "
-                "en el Excel (incluyendo las fórmulas de RESUMEN) antes de "
-                "seguir registrando pedidos."
+                f"La hoja HISTORIAL se quedó sin filas libres (hasta la fila {HIST_LAST_DATA_ROW})."
             )
 
         for it in items:
@@ -458,7 +374,7 @@ def crear_pedido(cliente, telefono, items, metodo_pago, num_transaccion):
 
 
 def get_pedidos_agrupados(desde=None, hasta=None, cliente=None, codigo=None):
-    """Agrupa HISTORIAL por pedido_id para mostrar en la vista de historial."""
+    """Agrupa HISTORIAL por pedido_id para mostrar en el panel de ventas."""
     historial = get_historial_raw()
 
     def pasa_filtros(h):
